@@ -1,128 +1,131 @@
-# Telco Customer Churn Prediction
+# Customer Churn Prediction: Telecom
 
-A machine learning project that predicts which telecom customers are likely to leave (churn), so a retention team can contact them **before** they go.
+Machine learning project that identifies which telecom customers are likely to leave (churn), so a retention team can contact them **before** they go.
 
-The notebook covers the full workflow: data cleaning, exploratory analysis, preprocessing, model building and tuning, error analysis, model interpretation, and packaging the final model as a reusable scikit-learn pipeline.
+**Final model:** Logistic Regression (`class_weight="balanced"`, `C=3`) inside a leak-free scikit-learn pipeline.
+**Test-set result (1,409 unseen customers):** 78% churn recall, 50% churn precision, ROC-AUC 0.841, PR-AUC 0.629.
 
-## Problem statement
+## Business problem
 
-Winning a new customer costs much more than keeping an existing one. About **26.5%** of customers in this dataset churned, so the classes are imbalanced and plain accuracy is misleading (a model that always says "No churn" is already 73.5% accurate).
+Winning a new customer costs far more than keeping an existing one. A model that flags at-risk customers lets the retention team focus offers where they matter.
 
-Because a missed churner costs more than an unnecessary retention offer, **recall on the churn class** is the main metric. Precision and F1 are tracked alongside it.
+Only about 26.5% of customers churn, so the classes are imbalanced. A model that predicts "nobody churns" already scores 73.5% accuracy, so accuracy is **not** used as the headline metric. Models are judged on recall, precision, F1, ROC-AUC and PR-AUC for the churn class.
 
 ## Dataset
 
-- **Telco Customer Churn** (IBM sample dataset, widely available on Kaggle)
-- 7,043 customers, 21 columns: demographics, account information, subscribed services, monthly/total charges, and the `Churn` label
-- Expected file name: `Telco-Customer-Churn.csv`, placed in the same folder as the notebook
+[IBM Telco Customer Churn](https://www.kaggle.com/datasets/blastchar/telco-customer-churn): 7,043 customers and 21 columns (demographics, services, contract, billing and the churn label). Each row is one customer and the target is `Churn` (Yes / No).
+
+The CSV is not included in this repository. Download it and save it as `data/Telco-Customer-Churn.csv`.
 
 ## Approach
 
-1. **Data cleaning**: `TotalCharges` was stored as text; blank values (11 customers with `tenure = 0`) were filled with 0 and the column converted to numeric.
-2. **EDA**: target distribution, contract type, tenure groups, monthly charges.
-3. **Preprocessing**: binary mapping and one-hot encoding, stratified 60/20/20 train/validation/test split, standard scaling of numeric columns.
-4. **Modelling**: KNN baseline, then SMOTE for class imbalance, then hyperparameter tuning (grid search and a sweep over `k`), then comparison with Logistic Regression.
-5. **Error analysis**: what the missed churners look like.
-6. **Interpretation**: permutation importance.
-7. **Final pipeline**: `ColumnTransformer` + SMOTE + KNN (`k=17`, distance-weighted) in one `imblearn` pipeline, saved with `joblib`.
+1. **Data cleaning:** `TotalCharges` is stored as text. Its 11 blank values all belong to customers with `tenure = 0` (not billed yet), so they are set to 0 rather than dropped or guessed.
+2. **EDA:** class balance, churn rate by segment, tenure, monthly charges and numeric correlations.
+3. **Leak-free preprocessing:** the data is split first (80/20, stratified). Scaling, one-hot encoding and SMOTE live inside a `Pipeline`, so they are refit on each cross-validation fold.
+4. **Model comparison:** Dummy baseline, KNN + SMOTE, Logistic Regression, Random Forest and Gradient Boosting, compared with 5-fold stratified CV on the training set.
+5. **Tuning:** `GridSearchCV` on the full pipeline for KNN and Logistic Regression, optimising F1 on the churn class.
+6. **Final evaluation:** the test set is scored once.
+7. **Interpretation:** coefficients, permutation importance, error analysis and a decision-threshold trade-off.
+8. **Deployment-ready artifact:** the whole pipeline is saved with `joblib` and accepts raw customer data.
 
 ## Results
 
-Validation set (1,409 customers):
-
-| Model | Accuracy | Recall | Precision | F1 |
+| Model (5-fold CV, training set) | Recall | F1 | ROC-AUC | PR-AUC |
 |---|---|---|---|---|
-| Always predict "No churn" | 0.735 | 0.000 | - | - |
-| KNN (k=5) | 0.758 | 0.508 | 0.548 | 0.527 |
-| KNN (k=5) + SMOTE | 0.705 | 0.701 | 0.463 | 0.557 |
-| KNN (k=17, distance-weighted) + SMOTE | 0.700 | **0.743** | 0.460 | 0.569 |
-| Logistic Regression + SMOTE | 0.757 | 0.706 | 0.531 | 0.606 |
+| Gradient Boosting | 0.799 | 0.632 | 0.848 | 0.667 |
+| Logistic Regression | 0.803 | 0.629 | 0.846 | 0.660 |
+| Random Forest | 0.730 | 0.633 | 0.844 | 0.656 |
+| KNN + SMOTE | 0.775 | 0.585 | 0.796 | 0.549 |
+| Dummy baseline | 0.000 | 0.000 | 0.500 | 0.265 |
 
-Final pipeline on the held-out **test set**: accuracy 0.711, precision 0.474, **recall 0.797**, F1 0.594.
+Logistic Regression, Random Forest and Gradient Boosting are statistically indistinguishable, so the simplest and most interpretable one was chosen.
 
-### Key findings
+| Test set (threshold 0.5) | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---|---|---|---|---|
+| KNN + SMOTE (first model) | 0.459 | 0.874 | 0.602 | 0.827 | 0.608 |
+| **Logistic Regression (final)** | 0.505 | 0.783 | 0.614 | 0.841 | 0.629 |
 
-- **Contract type is the strongest signal**: month-to-month customers churn at 42.7%, one-year at 11.3%, two-year at 2.8%.
-- **The first year is the danger zone**: customers with 1-12 months of tenure churn at 47.7% and make up 55% of all churners.
-- **Churners pay more**: about $74 per month on average versus $61 for retained customers.
-- **SMOTE and tuning lift recall from 0.51 to about 0.74**, at the cost of precision (about 0.46).
-- **Missed churners look like ordinary customers** (average tenure and charges), so they are hard to separate using the available features.
+- The final model catches 293 of 374 real churners.
+- Contacting the top 30% of customers by risk score reaches about 64% of all churners, which is 2.2x better than random.
+- Test scores are close to cross-validated scores (F1 0.61 vs 0.63), which suggests no overfitting or leakage.
 
-## Project structure
+## Key findings
 
-```
-.
-├── Customer_Churn_Prediction.ipynb   # main notebook
-├── Telco-Customer-Churn.csv          # dataset (add it here)
-├── requirements.txt
-├── .gitignore
-└── README.md
-```
+- **Contract type, tenure and internet service are the strongest churn signals.** Month-to-month customers churn at about 43% (two-year contracts: about 3%). Customers in their first year churn at about 47%.
+- Fiber-optic customers (about 42%), electronic-check payers (about 45%) and customers without Tech Support or Online Security churn far more than average.
+- The model catches the textbook churner (new, month-to-month, fiber) but misses churners who look loyal. Better performance would need new data such as support tickets, usage or competitor pricing.
 
-`churn_pipeline.pkl` is created when you run the notebook (it is git-ignored).
+## Limitations
+
+- About half of the flagged customers are false alarms (precision about 50%).
+- The output is a **risk score for ranking customers**, not a calibrated probability.
+- Static snapshot: no time, usage, complaint or competitor data.
+- Coefficients show association, not causation, and several features are correlated (`tenure`, `TotalCharges`, `MonthlyCharges`).
 
 ## Getting started
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/<your-username>/<your-repo-name>.git
-cd <your-repo-name>
+git clone https://github.com/Neha1101-04/<repo-name>.git
+cd <repo-name>
 
-# 2. Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 4. Add Telco-Customer-Churn.csv to the project folder, then launch Jupyter
-jupyter notebook Customer_Churn_Prediction.ipynb
+# place the dataset at data/Telco-Customer-Churn.csv, then:
+jupyter notebook
 ```
 
-Python 3.9 or newer is recommended.
+Open the notebook and run all cells. The trained pipeline is written to `models/churn_pipeline.joblib`.
 
-## Using the saved model
+## Predicting for a new customer
 
-After running the notebook, `churn_pipeline.pkl` contains the full pipeline (encoding, scaling, SMOTE, KNN). It accepts raw customer data:
+The saved object is the entire pipeline (preprocessing + model), so it takes raw feature values exactly as they appear in the source table.
 
 ```python
 import joblib
 import pandas as pd
 
-pipeline = joblib.load("churn_pipeline.pkl")
+model = joblib.load("models/churn_pipeline.joblib")
 
 customer = {
-    "gender": "Male", "SeniorCitizen": 0, "Partner": "No", "Dependents": "No",
-    "tenure": 5, "PhoneService": "Yes", "MultipleLines": "No",
-    "InternetService": "Fiber optic", "OnlineSecurity": "No", "OnlineBackup": "No",
-    "DeviceProtection": "No", "TechSupport": "No", "StreamingTV": "Yes",
-    "StreamingMovies": "Yes", "Contract": "Month-to-month", "PaperlessBilling": "Yes",
-    "PaymentMethod": "Electronic check", "MonthlyCharges": 90.5, "TotalCharges": 452.5,
+    "gender": "Male", "SeniorCitizen": 0, "Partner": "No", "Dependents": "No", "tenure": 5,
+    "PhoneService": "Yes", "MultipleLines": "No", "InternetService": "Fiber optic",
+    "OnlineSecurity": "No", "OnlineBackup": "No", "DeviceProtection": "No", "TechSupport": "No",
+    "StreamingTV": "Yes", "StreamingMovies": "Yes", "Contract": "Month-to-month",
+    "PaperlessBilling": "Yes", "PaymentMethod": "Electronic check",
+    "MonthlyCharges": 90.5, "TotalCharges": 452.5,
 }
 
-df = pd.DataFrame([customer])
-print(pipeline.predict(df)[0])            # 1 = likely to churn
-print(pipeline.predict_proba(df)[0][1])   # churn score
+score = model.predict_proba(pd.DataFrame([customer]))[0, 1]
+print("Churn" if score >= 0.5 else "Stay", round(score, 3))
 ```
 
-Pickle files depend on library versions, so load the model with the same scikit-learn version used to train it.
+## Repository structure
 
-## Limitations
-
-- KNN probabilities are neighbour vote shares: fine for ranking customers by risk, but not calibrated probabilities.
-- The grid search ran on SMOTE-resampled data, so its cross-validation scores are optimistic.
-- Precision is low (about 0.46-0.47), so many retention offers would go to customers who would have stayed.
-- Results come from a single train/validation/test split.
-- Only contract, tenure and monthly charges were explored in depth in the EDA.
+```
+.
+├── Customer_Churn_Prediction.ipynb   # full analysis (rename to match your file)
+├── data/
+│   └── Telco-Customer-Churn.csv      # not tracked, download separately
+├── models/
+│   └── churn_pipeline.joblib         # created by the notebook
+├── requirements.txt
+└── README.md
+```
 
 ## Next steps
 
-- Try tree-based models (Random Forest, gradient boosting)
-- Try class weights or a tuned decision threshold instead of SMOTE
-- Choose the model and threshold using the actual cost of false negatives and false positives
-- Calibrate predicted probabilities
-- Wrap the pipeline in a small app or API
+- Choose the decision threshold from real costs (offer cost vs customer lifetime value).
+- Calibrate probabilities (`CalibratedClassifierCV`) and add SHAP explanations.
+- Feature engineering (number of services, charge per month of tenure) and tuned XGBoost / LightGBM.
+- Wrap the pipeline in an API or Streamlit app and add drift monitoring.
 
 ## Tech stack
 
-Python, pandas, NumPy, matplotlib, seaborn, scikit-learn, imbalanced-learn, joblib, Jupyter
+Python, pandas, NumPy, scikit-learn, imbalanced-learn, Matplotlib, Seaborn, joblib.
+
+## Author
+
+**Neha Edwin**: B.Tech Computer Science & Engineering student
+[LinkedIn](https://www.linkedin.com/in/neha-edwin-5316b2298) · [GitHub](https://github.com/Neha1101-04) · neha1101@gmail.com
